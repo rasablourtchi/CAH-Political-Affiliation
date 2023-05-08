@@ -1,0 +1,380 @@
+---
+title: "GSB 544 FINAL CATEGORICAL"
+author: "Rasa Blourtchi"
+date: "2022-12-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+## Global options
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+
+```{r}
+library(here)
+library(tidyverse)
+library(tidymodels)
+library(readr)
+library(ggplot2)
+library(rpart.plot)
+library(vip)
+```
+
+
+```{r}
+data <- read_csv("FInal Exam/gsb-544-fall-2022-cah/CAH-201803-train.csv")
+
+
+```
+
+
+```{r}
+data <- data %>% 
+  mutate_all(as.factor)
+data1 <- data %>% dplyr::select(-id_num)
+```
+
+```{r}
+set.seed(154622)
+
+data1_cv <- vfold_cv(data1, v = 10)
+data_split <- initial_split(data, prop = 0.8)
+
+train <- training(data_split)
+test <- testing(data_split)
+
+train_cv <- vfold_cv(train, v = 10)
+
+```
+
+
+```{r}
+rf_mod <- rand_forest(mtry = tune(), trees = tune(), min_n = tune()) %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
+
+
+rf_wflow <- workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(recipe(political_affiliation ~ ., data = data1, importance = TRUE))
+
+grid_search <- 
+  tune_grid(
+    rf_wflow,
+    resamples = data1_cv,
+    grid = 25,
+    control = control_grid(save_pred = TRUE)
+  )
+```
+
+
+```{r}
+tuning_metrics <- grid_search %>% collect_metrics()
+
+tuning_metrics %>% 
+  filter(.metric == "accuracy") %>% 
+  arrange(desc(mean))
+```
+
+
+```{r}
+rf_mod <- rand_forest(mtry = 5, trees = 1368, min_n = 9) %>% 
+  set_engine("ranger") %>% 
+  set_mode("classification")
+
+rf_wflow <- workflow() %>% 
+  add_model(rf_mod) %>% 
+  add_recipe(rec3)
+
+rf_fit <- rf_wflow %>% 
+  fit_resamples(data1_cv)
+  
+
+rf_fit %>% collect_metrics()
+```
+
+```{r}
+splits <- initial_split(data1)
+
+last_rf_mod <- rand_forest(mtry = 5, trees = 1368, min_n = 9) %>% 
+  set_engine("ranger", importance = "impurity") %>% 
+  set_mode("classification")
+
+
+last_rf_wflow <- rf_wflow %>% 
+  update_model(last_rf_mod)
+
+last_rf_fit <- last_rf_wflow %>% 
+  last_fit(splits)
+
+
+last_rf_fit %>% 
+  extract_fit_parsnip() %>% 
+  vip(num_features = 20)
+```
+
+
+
+```{r}
+
+rec1 <- recipe(political_affiliation ~ Q4+ Q2 + Q6 + Q17 + Q5 + Q1 + Q18 + Q13 + Q8 + Q11 + Q15, data = train)
+
+rec2 <- recipe(political_affiliation ~ Q4 + Q2 + Q6 + Q16 + Q15 + Q13, data = train)
+
+rec3 <- recipe(political_affiliation ~ Q4 + Q5 + Q6 + Q8 + Q9 + Q11 + Q16 + Q13, data = train)
+
+rec4 <- recipe(political_affiliation ~ Q4 + Q5 + Q6 + Q8 + Q10 + Q11 + Q12 + Q13 + Q16 + Q17, data = train) 
+#
+
+rec5 <- recipe(political_affiliation ~ Q4 + Q5 + Q6 + Q11 + Q12 + Q15, data = train)
+  
+```
+
+
+```{r}
+knn <- nearest_neighbor(neighbors = tune()) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+knn_wflow <- workflow() %>% 
+  add_model(knn) %>% 
+  add_recipe(rec8)
+
+k_grid <- grid_regular(neighbors(c(2, 30)), levels = 10)
+set.seed(7546)
+
+knn_k <- knn_wflow %>% 
+  tune_grid(resamples = train_cv,
+            grid = k_grid)
+
+knn_k %>% show_best('accuracy') 
+```
+
+```{r}
+knn1 <- nearest_neighbor(neighbors = 18) %>% 
+  set_engine("kknn") %>% 
+  set_mode("classification")
+
+knn_wflow <- workflow() %>% 
+  add_model(knn1) %>% 
+  add_recipe(rec4)
+
+knn_fit <- knn_wflow %>% 
+  fit_resamples(train_cv)
+
+
+knn_fit %>% collect_metrics()
+
+knn_fit <- knn_wflow %>% 
+  fit(train)
+```
+
+
+```{r}
+svm_mod <- svm_poly(cost = tune(), degree = 1) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_grid <- expand.grid(cost = c(0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2, 2.25, 2.5, 2.75, 3 ))
+
+svm_wflow <- workflow() %>% 
+  add_model(svm_mod) %>% 
+  add_recipe(rec4)
+
+
+svm_results <-  svm_wflow %>% 
+  tune_grid(resamples = train_cv,
+            grid = svm_grid)
+
+
+svm_results %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>% 
+  arrange(desc(mean))
+```
+
+
+
+```{r}
+svm_mod <- svm_poly(cost = 0.25, degree = tune()) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_degree_grid <- expand.grid(degree = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+
+svm_wflow <- workflow() %>% 
+  add_model(svm_mod) %>% 
+  add_recipe(rec4)
+
+
+svm_results <-  svm_wflow %>% 
+  tune_grid(resamples = train_cv,
+            grid = svm_degree_grid)
+
+svm_results %>% 
+  collect_metrics() %>%
+  filter(.metric == "accuracy") %>% 
+  arrange(desc(mean))
+
+
+svm_mod <- svm_poly(cost = 0.25, degree = 1) %>%
+  set_mode("classification") %>%
+  set_engine("kernlab")
+
+svm_wflow <- workflow() %>% 
+  add_model(svm_mod) %>% 
+  add_recipe(rec4)
+
+svm_final_fit <- svm_wflow %>% 
+  fit_resamples(train_cv)
+
+svm_final_fit %>% collect_metrics()
+
+svm_fit <- svm_wflow %>% 
+  fit(train)
+
+```
+
+
+
+```{r}
+tree_grid <- grid_regular(cost_complexity(),
+                          tree_depth(),
+                          min_n(),
+                          levels = 2)
+
+tree_mod <- decision_tree(cost_complexity = tune(),
+                          tree_depth = tune(),
+                          min_n = tune()) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+
+
+tree_wflow <- workflow() %>% 
+  add_recipe(rec4) %>% 
+  add_model(tree_mod)
+
+
+tree_grid_search <-
+  tune_grid(
+    tree_wflow,
+    resamples = train_cv,
+    grid = tree_grid
+  )
+
+tuning_metrics <- tree_grid_search %>% collect_metrics()
+tuning_metrics
+
+tuning_metrics %>% 
+  arrange(desc(mean))
+
+```
+
+
+
+```{r}
+tree_mod <- decision_tree(cost_complexity = 1,
+                          tree_depth = 10,
+                          min_n = 40) %>% 
+  set_engine("rpart") %>% 
+  set_mode("classification")
+
+
+
+tree_wflow <- workflow() %>% 
+  add_recipe(rec4) %>% 
+  add_model(tree_mod)
+
+tree_final_fit <- tree_wflow %>% 
+  fit_resamples(train_cv)
+
+tree_final_fit %>% collect_metrics()
+
+tree_fit <- tree_wflow %>% 
+  fit(train)
+
+```
+
+
+```{r}
+qda_mod <- discrim_regularized(frac_common_cov = 0) %>% 
+             set_engine('klaR') %>% 
+             set_mode('classification')
+
+qda_wflow <- workflow() %>% 
+  add_model(qda_mod) %>% 
+  add_recipe(rec4)
+
+qda_cv_fit <- qda_wflow %>%
+  fit_resamples(resamples = train_cv)
+
+qda_cv_fit %>% collect_metrics()
+
+qda_fit <- qda_wflow %>% 
+  fit(train)
+```
+
+
+
+
+
+```{r}
+lda_mod <- discrim_linear() %>%
+  set_engine("MASS") %>%
+  set_mode("classification")
+
+
+
+lda_wflow <- workflow() %>%
+  add_recipe(rec4) %>%
+  add_model(lda_mod)
+
+lda_cv_fit <- lda_wflow %>%
+  fit_resamples(resamples = train_cv)
+
+lda_cv_fit %>% collect_metrics()
+
+lda_fit <- lda_wflow %>% 
+  fit(train)
+```
+
+
+
+```{r}
+data_pred <- test %>%
+  mutate(
+    pred_affiliation = predict(tree_fit, test)$.pred_class
+  )
+```
+
+```{r}
+my_metrics <- metric_set(accuracy)
+
+data_pred %>%
+  my_metrics(truth = political_affiliation, estimate = pred_affiliation) 
+```
+
+
+
+```{r}
+test_data <- read_csv("FInal Exam/gsb-544-fall-2022-cah/CAH-201803-test.csv")
+
+test_data <- test_data %>% 
+    mutate_all(as.factor)
+
+```
+
+
+
+```{r}
+final_predictions <- data.frame(
+    id_num  = test_data$id_num,
+    political_affiliation_predicted = predict(svm_fit, test_data)$.pred_class
+)
+
+
+final_predictions %>% write_csv("final_predictions3.csv")
+```
+
